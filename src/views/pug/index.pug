@@ -18,13 +18,13 @@ html
     if showLogin
       hr
       h2.center Login Form
-      form(action='/login', method='post').center
+      form(action='/api/user/login', method='post').center
         div
           label Username:
-          input(type='text', name='username')
+          input(type='text', name='username' value='justice')
         div
           label Password:
-          input(type='password', name='password')
+          input(type='password', name='password' value='justice1')
         div
           input(type='submit', value='Log In')
           
