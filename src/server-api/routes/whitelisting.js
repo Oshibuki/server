@@ -8,6 +8,7 @@ let routes = express.Router();
 routes.get('/', async (req, res) => {
     let { uid, username, playerid, server, set } = req.query;
     server = server.slice(5)
+    set = parseInt(set)
     try {
         if (!uid || !username){
             res.send('No UID or player name provided!')

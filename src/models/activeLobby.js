@@ -2,21 +2,20 @@ import mongoose from 'mongoose'
 
 const ActiveLobbySchema = new mongoose.Schema({
     uid: String,
-    friendUID: String,
+    friendUID: {type:String,default:null},
     lobbyID: String,
     username: String,
-    lobbyStatus: {type:Boolean,default:false},
-    mmr: Number,
-    hiddenMMR: Number,
-    team: Number,
-    opponentsTeam: Number,
-    kills: Number,
-    teamkills: Number,
-    deaths: Number,
-    damage: Number,
-    teamDamage: Number,
+    lobbyStatus: {type:Boolean,default:false}, // is ready or not
+    mmr: {type:Number,default:0},
+    team: {type:Number,default:0},
+    opponentsTeam: {type:Number,default:0},
+    kills: {type:Number,default:0},
+    teamkills: {type:Number,default:0},
+    deaths: {type:Number,default:0},
+    damage: {type:Number,default:0},
+    teamDamage: {type:Number,default:0},
     abandoned: {type:Boolean,default:false},
-    hitsLanded: Number,
+    hitsLanded: {type:Number,default:0},
 })
 
 export default mongoose.model('ActiveLobby', ActiveLobbySchema)

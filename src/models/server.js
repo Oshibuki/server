@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { Factions} from '../constants/index.js'
+import { Factions, Regions} from '../constants/index.js'
 
 const ServerSchema = new mongoose.Schema({
     playersCount: {type:Number,default:0},
@@ -14,6 +14,7 @@ const ServerSchema = new mongoose.Schema({
     map: String,
     faction1: { type: String, enum: Factions },
     faction2: { type: String, enum: Factions },
+    region: { type: String, enum: Regions },
 });
 
 export default mongoose.model('Server', ServerSchema);

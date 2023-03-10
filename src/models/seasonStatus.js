@@ -3,7 +3,7 @@ import mongoose from 'mongoose'
 const SeasonStatusSchema = new mongoose.Schema({
     uid:String,
     username:String,
-    NameChanged:{type:Boolean,default:false},
+    nameChanged:{type:Boolean,default:false},
     gmmr:{ type: Number, default: 1000 },
     mmr: { type: Number, default: 1000 },
     bwins: { type: Number, default: 0 },
@@ -23,8 +23,8 @@ const SeasonStatusSchema = new mongoose.Schema({
     topsilver: {type:Boolean,default:false},
     topbronze: {type:Boolean,default:false},
     topgroupfight: {type:Boolean,default:false},
-    topduel: {type:Boolean,default:false},
-    totalDamage:{ type: Number, default: 0 }
+    bTotalDamage:{ type: Number, default: 0 },
+    gTotalDamage:{ type: Number, default: 0 }
 })
 
 export default mongoose.model('SeasonStatus', SeasonStatusSchema)

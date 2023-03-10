@@ -1,83 +1,78 @@
 import http from 'http'
 import { Server } from 'socket.io'
 import dotenv from 'dotenv';
-import passport from 'passport'
+import { User } from './models/index.js';
+import userProcedure from './socket/user.js'
+import serverProcedure from './socket/server.js'
+import adminProcedure from './socket/admin.js'
 dotenv.config();
 
-export  function serverStarter(app, sessionMiddleware) {
+
+export function serverStarter(app) {
     const httpserver = http.createServer(app);
-    const io = new Server(httpserver);
+    const io = new Server(httpserver, {
+        cors: {
+            origin: "http://localhost:4000"
+        },
+        connectionStateRecovery: {
+            // the backup duration of the sessions and the packets
+            maxDisconnectionDuration: 2 * 60 * 1000,
+            // whether to skip middlewares upon successful recovery
+            skipMiddlewares: true,
+        }
+    });
+
+    const currentUsers = new Map()
+    io.of("/").adapter.on("leave-room", (room, id) => {
+        console.log(`socket ${id} has leave room ${room}`);
+    });
+
+    io.of("/").adapter.on("join-room", (room, id) => {
+        console.log(`socket ${id} has joined room ${room}`);
+    });
 
     app.use((req, res, next) => {
         req.io = io;
         return next();
     });
 
-    // convert a connect middleware to a Socket.IO middleware
-    const wrap = middleware => (socket, next) => middleware(socket.request, {}, next);
-
-    io.use(wrap(sessionMiddleware));
-    io.use(wrap(passport.initialize()));
-    io.use(wrap(passport.session()));
-
-    io.use((socket, next) => {
-        if (socket.request.user) {
-            next();
-        } else {
-            next(new Error('unauthorized'))
+    io.of('/').on('connection', async socket => {
+        if (!socket.handshake.auth.token) {
+            socket.disconnect()
         }
-    });
+        const uid = socket.handshake.auth.token
+        const user = await User.findOne({ uid })
+        if (!user) socket.disconnect()
 
-    // io.of(<your namespace>).use(wrap(sessionMiddleware)); //if using passport, it will be socket.request.session.passport.user
-    // io.of(<your namespace>).use(wrap(passport.initialize()));
-    // io.of(<your namespace>).use(wrap(passport.session())); // this sets it to socket.request.user
-
-
-
-    let currentUsers = 0;
-    io.on('connection', socket => {
+                //定时更新当前在线人数到网页
         const timer = setInterval(() => {
-            socket.request.session.reload((err) => {
-                if (err) {
-                    // forces the client to reconnect
-                    socket.conn.close();
-                    // you can also use socket.disconnect(), but in that case the client
-                    // will not try to reconnect
-                }
-            });
-        }, process.env.SESSION_RELOAD_INTERVAL);
+            socket.emit("currentCount",io.engine.clientsCount)
+        }, 2000)
 
-        currentUsers++
-        console.log('user ' + socket.request.user.username + ' connected');
-        io.emit('user count', currentUsers);
-        io.emit('user', {
-            username: socket.request.user.username,
-            currentUsers,
-            connected: true
-        });
-        const sessionId = socket.request.session.id;
-        socket.join(sessionId);
-
-        socket.on('disconnect', () => {
-            currentUsers--
-            console.log(socket.request.user.username+" disconnected");
-
-            io.emit('user', {
-                username: socket.request.user.username,
-                currentUsers,
-                connected: false
-            });
-
-            clearInterval(timer);
+        socket.on('disconnecting', () => {
+            console.log(socket.id + " disconnected")
+            //广播玩家离线信息
+            io.emit('chatMsg', {
+                senderName: "Server",
+                timeStamp: new Date(),
+                message: `${user.region} - ${user.username} has disconnected`
+            })
+            currentUsers.delete(uid)
+            clearInterval(timer)
         });
 
-        socket.on('chat message', (message) => {
-            io.emit('chat message', {
-                username: socket.request.user.username,
-                message: message
-            });
-        });
+
+        userProcedure(socket, io, user,currentUsers)
+        serverProcedure(socket, io, user,currentUsers)
+        adminProcedure(socket, io, user)
     });
+
+
+
+
+
+
+
 
     const PORT = process.env.PORT || 3000;
 

@@ -1,7 +1,7 @@
 import express from 'express'
 import write from 'write'
 import { Server,User } from '../../models/index.js'
-import readLinesFilter from '../../utils/readLinesFilter'
+import readLinesFilter from '../../utils/readLinesFilter.js'
 let routes = express.Router();
 
 
