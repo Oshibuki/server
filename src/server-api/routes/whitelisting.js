@@ -1,7 +1,7 @@
 import express from 'express'
-import write from 'write'
 import { PlayerStatus, SeasonStatus, User, Server, ActiveLobby } from '../../models/index.js'
 import { Gamemode } from '../../constants/index.js';
+import getRank from '../../utils/getRank.js'
 let routes = express.Router();
 
 
@@ -48,7 +48,7 @@ routes.get('/', async (req, res) => {
                 return
             }
             
-            const { uid, team } = await ActiveLobby.findOne({ lobbyID: server, uid, username })
+            let { uid, team } = await ActiveLobby.findOne({ lobbyID: server, uid, username })
             if (!user) {
                 res.send(`200|${playerid}|${isAdmin}`)
                 return
@@ -68,7 +68,7 @@ routes.get('/', async (req, res) => {
             }
             // Season MMR
             const seasonStatus = SeasonStatus.findOne({ uid })
-            const currentMMR = currentServer.gamemode == Gamemode.battle ? seasonStatus.mmr : gamemode == Gamemode.groupfight ? seasonStatus.gmmr : 0
+            const currentMMR = currentServer.gamemode == Gamemode.battle ? seasonStatus.mmr : currentServer.gamemode == Gamemode.groupfight ? seasonStatus.gmmr : 0
             const rank = getRank(currentMMR)
             res.send(`100|${playerid}|${team}|0|${rank}|${currentMMR}|${isAdmin}`)
             return

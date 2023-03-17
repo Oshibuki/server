@@ -46,7 +46,7 @@ myDB(async () => {
     app.use('/matchmaking', matchMakingRouter)
     app.use('/api', apiRouter)
 
-    app.use((req, res, next) => {
+    app.use((req, res) => {
         res.status(404).type('text')
             .send('Not Found');
     });

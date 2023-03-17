@@ -1,4 +1,4 @@
 export default {
-    battle:12,
+    battle:2,
     groupfight:6
 }

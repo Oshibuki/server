@@ -1,21 +1,57 @@
-import { ActiveLobby, Ban, Friend, Map, MatchHistory, PlayerArchive, PlayerStatus, Report, SeasonStatus, Server, User, Warning } from './models'
-import { Gamemode } from './constants'
+/* eslint-disable no-unexpected-multiline */
+import { ActiveLobby, Map, SeasonStatus, Server, User, Warning } from './models/index.js'
+import { Gamemode, Factions } from './constants/index.js'
+import { v4 as uuidv4 } from 'uuid';
 
 class FServer {
 
-    async AddPlayerToLobby(socket, uid, gamemode) {
-        let [LobbiesFull, AlreadyInLobby, StillBanned, Requeue, Duo] = [false, false, false, false, false]
+    static async sendMsg(uid, io, event, msg = undefined) {
+        try {
+            const user = await User.findOne({ uid })
+            if (user) {
+                const sockets =await io.in(user.connectionId).fetchSockets()
+                for (const socket of sockets) {
+                    socket.emit(event, msg)
+                }
+            }
+        } catch (error) {
+            console.log(error)
+        }
+        
+    }
+
+    static async getUserSocketID(uid) {
+        const user = await User.findOne({ uid })
+        if (user) {
+            return user.connectionId
+        }
+    }
+
+    static async AddPlayerToLobby(uid, gamemode, io) {
+        let [LobbiesFull, StillBanned, Requeue, AlreadyInLobby] = [false, false, false, false]
         const user = await User.findOne({ uid })
         if (!user) return
+        if(user.uid=="initial" )return
         let player = {}
+
+        // Check if any server of this gamemode is avaliable
+        let servers = await Server.find({ region: user.region, gamemode, lobbyFull: false, playersCount: { $lt: gamemode } }, { _id: 0, __V: 0 }).sort({ playersCount: -1 }).limit(1).exec()
+        if (servers.length > 0) {
+            player.lobbyID = servers[0].lobbyID
+        } else {
+            LobbiesFull = true;
+            await FServer.sendMsg(uid, io, "joinlobby", { code: 0, msg: 'Servers are currently unavailable for this gamemode!' })
+            return
+        }
 
         //check baned
         if (user.banned) {
             //check ban 
             if (user.banEnd) {
                 if (new Date() < new Date(user.banEnd)) {
-                    socket.emit("joinlobby", { code: 0, msg: `You have been banned temporarily for ${user.banReason}. The ban will be lasting to ${new Date(user.banEnd).toLocaleTimeString()}` })
+                    await FServer.sendMsg(uid, io, "joinlobby", { code: 0, msg: `You have been banned temporarily for ${user.banReason}. The ban will be lasting to ${new Date(user.banEnd).toLocaleTimeString()}` })
                     StillBanned = true
+                    return
                 }
                 else {
                     await User.updateOne({ uid }, { banned: false, banEnd: null, banStart: null, banReason: null })
@@ -24,57 +60,26 @@ class FServer {
                 }
             }
             else {
-                socket.emit("joinlobby", { code: 0, msg: `You have been banned permanently for ${user.banReason}. You may request an appeal on the WBMM forum.` })
+                await FServer.sendMsg(uid, io, "joinlobby", { code: 0, msg: `You have been banned permanently for ${user.banReason}. You may request an appeal on the WBMM forum.` })
                 return
             }
 
         }
-        if (StillBanned) return
+        // check if player is in a lobby already
+        await ActiveLobby.deleteMany({ uid })
 
-        // Check if any server of this gamemode is avaliable
-        let servers = await Server.find({ region: user.region, gamemode, lobbyFull: false, playersCount: { $lt: gamemode } }).sort({ playersCount: -1 }).limit(1).exec()
-        if (servers.length > 0) {
-            player.lobbyID = servers[0].lobbyID
-        } else {
-            LobbiesFull = true;
-            socket.emit("joinlobby", { code: 0, msg: 'Servers are currently unavailable for this gamemode!' })
-            return
-        }
-
-        // check if player is in a full lobby already
-        let tmp = await ActiveLobby.aggregate([
-            { "$match": { uid, lobbyID: player.lobbyID } },
-            {
-                "$lookup": {
-                    "localField": "lobbyID",
-                    "from": "server",
-                    "foreignField": "lobbyID",
-                    "as": "currentLobby"
-                }
-            },
-            { "$unwind": "$currentLobby" },
-            {
-                "$project": {
-                    "uid": 1,
-                    "lobbyID": 1,
-                    "currentLobby.lobbyFull": 1
-                }
-            }
-        ])
-        if (tmp.length > 0) {
-            AlreadyInLobby = true
-            socket.emit("joinlobby", { code: 0, msg: 'You are already in a lobby!' })
-            return
-        }
-
-        //get preset mmr
-        let mmr;
+        //get preset mmr and kdrate winrate
+        let mmr, winRate, kdRate;
         if (gamemode == Gamemode.battle) {
-            let tmp = await SeasonStatus.findOne({ uid }, { mmr: 1 })
+            let tmp = await SeasonStatus.findOne({ uid }, { mmr: 1, bkills: 1, bdeaths: 1, bwins: 1, bdraws: 1, blosses: 1 })
             mmr = tmp.mmr
+            winRate = (tmp.bwins + tmp.bdraws + tmp.blosses) == 0 ? 0 : (tmp.bwins / (tmp.bwins + tmp.bdraws + tmp.blosses))
+            kdRate = tmp.bdeaths == 0 ? 0 : tmp.bkills / tmp.bdeaths
         } else if (gamemode == Gamemode.groupfight) {
-            let tmp = await SeasonStatus.findOne({ uid }, { gmmr: 1 })
+            let tmp = await SeasonStatus.findOne({ uid }, { gmmr: 1, gkills: 1, gdeaths: 1, gwins: 1, gdraws: 1, glosses: 1 })
             mmr = tmp.gmmr
+            winRate = (tmp.gwins + tmp.gdraws + tmp.glosses) == 0 ? 0 : (tmp.gwins / (tmp.gwins + tmp.gdraws + tmp.glosses))
+            kdRate = tmp.gdeaths == 0 ? 0 : tmp.gkills / tmp.gdeaths
         }
 
         //update activelobby and server's playercount
@@ -83,63 +88,224 @@ class FServer {
             lobbyID: player.lobbyID,
             username: user.username,
             lobbyStatus: false,
-            mmr: mmr,  //preset mmr for match end calculate
-
+            mmr,  //preset mmr for match end calculate
+            winRate,
+            kdRate,
+            region:user.region
         }, { upsert: true })
         // Check if the player has been added
         if (await ActiveLobby.findOne({ uid }, { uid })) {
             let count = await ActiveLobby.countDocuments({ lobbyID: player.lobbyID })
             await Server.updateOne({ lobbyID: player.lobbyID }, { playersCount: count })
-            socket.emit("joinlobby", { code: 1, msg: 'canjoinlobby' })
-            // Check if Lobby is ready
-            UpdateLobby(uid, Region, Player.LobbyID);
-        } else {
-            socket.emit("joinlobby", { code: 0, msg: 'can not join in.Please retry' })
 
+            // Check if Lobby is ready
+            await FServer.UpdateLobby(player.lobbyID, io);
+            await FServer.sendMsg(uid, io, "canjoinlobby", { gamemode, lobbyInfo: servers[0] })
+            return
+        } else {
+            await FServer.sendMsg(uid, io, "requeue")
+            return
         }
 
-    };
-    async DeletePlayerFromLobby(socketId, uid, io) {
-        let record = await ActiveLobby.findOne({ uid })
+    }
+    static async DeletePlayerFromLobby(uid, io) {
+        let player = await ActiveLobby.findOne({ uid })
+        if (!player) return
+        let { lobbyID } = player
         // Check if player is in a started lobby
-        let server = await Server.findOne({ lobbyID: record.lobbyID })
+        let server = await Server.findOne({ lobbyID })
         if (!server.teamsAssigned) {
             //Delete player
-            await ActiveLobby.findByIdAndDelete({ uid })
+            await ActiveLobby.findOneAndDelete({ uid })
             // Unready all players
-            await ActiveLobby.updateMany({ lobbyID: record.lobbyID }, { lobbyStatus: false })
+            await ActiveLobby.updateMany({ lobbyID }, { lobbyStatus: false })
             // Retrieve the total players in the lobby
-            const count = await ActiveLobby.countDocuments({ lobbyID: record.lobbyID })
-            await Server.updateOne({ lobbyID: record.lobbyID }, { playersCount: count })
-
+            const count = await ActiveLobby.countDocuments({ lobbyID })
+            await Server.updateOne({ lobbyID }, { playersCount: count })
+            const { connectionId } = await User.findOne({ uid })
             // Signal exit room
-            io.to(socketId).emit("canexitlobby")
+            io.in(connectionId).emit("canexitlobby")
+
             // Check if Lobby is ready
-            UpdateLobby(uid, Region, Player.LobbyID);
+            await FServer.UpdateLobby(lobbyID, io);
         }
 
-    };
+    }
 
-    async matchTimer(region, lobbyID, gamemode, CountdownTime, io, currentUsers) {
-        let CountdownCancelled = False;
-        let PlayersReady = False;
-        (function loop() {
+    static async UpdateLobby(lobbyID, io) {
+        let QueueFull = false;
+        let MatchStarted = false;
+        let faction1 = "", faction2 = "";
+        let Team1UID = [], Team2UID = []
+
+
+        let server = await Server.findOne({ lobbyID })
+        let preMap = server.map;
+        let gamemode = server.gamemode
+        let region = server.region
+        if (!server.lobbyReady) {
+            // Check players in lobby
+            let playersCount = await ActiveLobby.countDocuments({ lobbyID })
+            if (playersCount != gamemode) {
+                // Reset lobby full flag
+                await Server.updateOne({ lobbyID }, { playersCount, lobbyFull: false })
+                // Reset status
+                await ActiveLobby.updateMany({ lobbyID }, { lobbyStatus: false })
+            } else {
+                QueueFull = true
+                // Check if all players in the lobby are ready
+                let unReadyPlayerCount = await ActiveLobby.countDocuments({ lobbyID, lobbyStatus: false })
+                if (unReadyPlayerCount == 0) {
+                    // Set lobby to countdown started = 1 so no one can join or leave
+                    await Server.updateOne({ lobbyID }, { lobbyReady: true })
+                    let playersCount = await ActiveLobby.countDocuments({ lobbyID })
+                    if (playersCount == gamemode) {
+                        // Check if all teams are already assigned
+                        let currentServer = await Server.findOne({ lobbyID })
+                        if (!currentServer.teamsAssigned) {
+                            // Teams assigned = 1
+                            await Server.updateOne({ lobbyID }, { teamsAssigned: true })
+
+                            // Retrieve all players MMR
+                            let mmrResult = await ActiveLobby.find({ lobbyID, team: 0 }, { uid: 1, mmr: 1 }).sort({ mmr: 'desc' })
+                            for (const [index, row] of mmrResult) {
+                                if (index % 2 == 1) Team1UID.push(row.uid)
+                                else Team2UID.push(row.uid)
+                            }
+                            // Assign TEAM 1 and TEAM 2 players
+                            await ActiveLobby.updateMany({ uid: { $in: Team1UID }, team: 0, lobbyID }, { team: 1, OpponentsTeam: 2 })
+                            await ActiveLobby.updateMany({ uid: { $in: Team2UID }, team: 0, lobbyID }, { team: 2, OpponentsTeam: 1 })
+
+                            // Random factions
+                            // eslint-disable-next-line no-constant-condition
+                            while (true) {
+                                let max = Factions.length
+                                faction1 = Factions[Math.floor(Math.random() * max)]
+                                faction2 = Factions[Math.floor(Math.random() * max)]
+                                if (faction1 != faction2) break;
+                            }
+                            // set to 'The Cage' map for groupfights and duels
+                            let newMap = ""
+                            if (gamemode == Gamemode.groupfight) {
+                                newMap = 'The Cage'
+                            } else {
+                                newMap = (await Map.findOne({ mapName: { $ne: preMap } })).mapName
+                            }
+                            // Set lobby to countdown started = 1 so no one can join and set map/factions
+                            await Server.updateOne({ lobbyID }, { faction1, faction2, map: newMap })
+
+                            // Starting match!
+                            await Server.updateOne({ lobbyID }, { matchStarted: true })
+
+                            // Generate a random match id
+                            let matchID = uuidv4()
+
+                            // Set match id
+                            await ActiveLobby.updateMany({ lobbyID }, { matchID, abandoned: true })
+
+                            MatchStarted = true;
+                            let now = new Date().toLocaleTimeString()
+                            if (gamemode == Gamemode.groupfight) {
+                                io.emit('chatMsg', {
+                                    senderName: "Server",
+                                    timeStamp: now,
+                                    message: `${region} - ${lobbyID} - A groupfight has started!`
+                                })
+                            } else if (gamemode == Gamemode.battle) {
+                                io.emit('chatMsg', {
+                                    senderName: "Server",
+                                    timeStamp: now,
+                                    message: `${region} - ${lobbyID} - A battle has started!`
+                                })
+                            }
+                            // Free the dynamic arrays
+                        }
+                    } else {
+                        QueueFull = false
+
+                        // Reset server
+                        await Server.updateOne({ lobbyID }, { playersCount, lobbyFull: false, lobbyReady: false })
+                        // Reset status
+                        await ActiveLobby.updateMany({ lobbyID }, { lobbyStatus: false })
+                    }
+                }
+            }
+
+
+            // Select connection Ids for all players in the lobby and broadcast change
+            const lobbyPlayers = await ActiveLobby.find({ lobbyID }, { _id: 0, __v: 0 })
+            if (QueueFull) {
+                // Check if countdown has started already before starting it
+                let server = await Server.findOne({ lobbyID })
+                if (!server.lobbyFull) {
+                    this.getTimer(lobbyID, gamemode, io).reset()
+                    await Server.findOneAndUpdate({ lobbyID },{lobbyFull:true})
+                }
+
+                // broad message to  lobbyID room
+                for(let player of lobbyPlayers){
+                    if (MatchStarted) {
+                        await FServer.sendMsg(player.uid,io,'matchstarted')
+                    } else {
+                        await FServer.sendMsg(player.uid,io,'updatequeue', lobbyPlayers)
+                    }
+                }
+                
+
+            } else {
+                for(let player of lobbyPlayers){
+                    await FServer.sendMsg(player.uid,io,'updatequeue', lobbyPlayers)
+                }
+            }
+        }
+    }
+
+    static async AcceptLobby(uid, io) {
+        // Change player status
+        let player = await ActiveLobby.findOneAndUpdate({ uid },{lobbyStatus:true},{new:true})
+        // Check if Lobby is ready
+        await FServer.UpdateLobby(player.lobbyID, io)
+    }
+
+
+    // static async NotifyPlayer(uid, NotificationMessage,io) {
+    //   const {connectionId} = await User.findOne({uid})
+    //   socket.to(connectionId).emit("notification", { NotificationMessage })
+    // }
+
+    static timerCollection = new Map()
+
+    // static {
+    //     this.timerCollection.set("test",1)
+    // }
+
+    static getLobbyTimer(lobbyID,gamemode,io) {
+        return function(){
+            
+        }
+    }
+
+    static lobbyTimer(lobbyID,gamemode,io) {
+        let timer = null;
+        let initial = 30
+        let CountdownTime = initial
+        let CountdownCancelled = false
+        let PlayersReady = false
+
+        function loop() {
             let flag = (CountdownCancelled == true) || (PlayersReady == true)
-            if (!flag) {
-                setTimeout(async () => {
+            if (!flag)
+                timer = setTimeout(async () => {
                     // Your logic here
                     let playerCount = await ActiveLobby.countDocuments({ lobbyID })
                     if (playerCount == gamemode) {
                         // Check if all players in the lobby are ready
                         let readyCount = await ActiveLobby.countDocuments({ lobbyID, lobbyStatus: true })
                         if (CountdownTime > 0) {
-                            if (readyCount < Gamemode) {
-                                // Load lobby players conlnection ids
-                                let statusResult = await ActiveLobby.find({ lobbyID })
-                                for (let row of statusResult) {
-                                    if (!row.lobbyStatus) {
-                                        io.to(currentUsers.get(row.uid)).emit("updatetimer", { CountdownTime })
-                                    }
+                            if (readyCount < gamemode) {
+                                const unReadyLobbyPlayers = await ActiveLobby.find({ lobbyID,lobbyStatus: false }, { _id: 0, __v: 0 })
+                                for (const player of unReadyLobbyPlayers) {
+                                    FServer.sendMsg(player.uid,io,"updatetimer",{ CountdownTime })
                                 }
                             } else {
                                 CountdownTime = 0;
@@ -148,506 +314,57 @@ class FServer {
 
                         } else {
                             // Kick players that didn't accept
-                            let unReadyPlayerResult = await ActiveLobby.find({ lobbyID, lobbyStatus: true })
+                            CountdownCancelled = true;
+                            let unReadyPlayerResult = await ActiveLobby.find({ lobbyID, lobbyStatus: false })
                             const now = new Date().toLocaleTimeString()
                             for (let player of unReadyPlayerResult) {
-                                FServer.DeletePlayerFromLobby(socket_id, player.uid, currentUsers);
+                                FServer.DeletePlayerFromLobby(player.uid, io);
                                 io.emit('chatMsg', {
                                     senderName: "Server",
                                     timeStamp: now,
                                     message: `${player.region} - ${player.username} was kicked from lobby for not accepting match.`
                                 })
                             }
-                            if (Gamemode > 6) {
+                            if (gamemode != Gamemode.groupfight) {
                                 io.emit('playerkicked', {
+                                    senderName: "Server",
                                     timeStamp: now,
-                                    message: `${player.region} - ${gamemode-unReadyPlayerResult.length} / ${gamemode} are currently in a groupfight queue!`
+                                    message: `${unReadyPlayerResult[0].region} - ${gamemode - unReadyPlayerResult.length} / ${gamemode} are currently in a groupfight queue!`
                                 })
                             } else {
                                 io.emit('playerkicked', {
+                                    senderName: "Server",
                                     timeStamp: now,
-                                    message: `${player.region} - ${gamemode-unReadyPlayerResult.length} / ${gamemode} are currently in a battle queue!`
+                                    message: `${unReadyPlayerResult[0].region} - ${gamemode - unReadyPlayerResult.length} / ${gamemode} are currently in a battle queue!`
                                 })
                             }
-                            CountdownCancelled = true;
+
                         }
                     } else {
                         CountdownCancelled = true;
                     }
                     CountdownTime--;
                     //new loop
-                    loop();
-                }, 1000);
-            }
-        })();
+                    loop(lobbyID,gamemode,io);
+                }, 1000,lobbyID,gamemode,io);
+        }
 
+        function reset() {
+            clearTimeout(timer);
+            timer = null;
+            CountdownTime = initial
+            loop()
+        }
+
+        function stop(){
+            clearTimeout(timer);
+            timer = null;
+        }
+        return { loop, reset, stop }
     }
-
-    async UpdateLobby(uid, region, lobbyID, io, socket, currentUsers) {
-        let QueueFull = False;
-        let LobbyReady = False;
-        let MatchStarted = False;
-        let MatchId;
-        let Faction1, Faction2;
-        let MapName;
-        let [Team1MMR, Team2MMR, Team1UID, Team2UID, ] = [[], [], [], []]
-        const lobbyReadySql = 'SELECT Gamemode, LobbyReady FROM servers WHERE LobbyID = ?'
-        const playersCountSql = 'SELECT COUNT(*) AS PlayersCount FROM active_lobby WHERE LobbyID = ?'
-        const lobbyStatusSql = 'SELECT LobbyStatus FROM active_lobby WHERE LobbyID = ?'
-
-
-        let lobbyResult = await DBConnection.awaitQuery(lobbyReadySql, LobbyID)
-        const Gamemode = lobbyResult[0].Gamemode
-        if (!lobbyResult[0].LobbyReady) {
-            // Check players in lobby
-            let playersCountResult = await DBConnection.awaitQuery(playersCountSql, LobbyID)
-            let PlayersCount = playersCountResult[0].PlayersCount
-
-            // Check if we have a total of x players in the lobby depending on game mode
-            if (PlayersCount == Gamemode) {
-                QueueFull = true
-
-                // Check if all players in the lobby are ready
-                let lobbyStatusResult = await DBConnection.awaitQuery(lobbyStatusSql, LobbyID)
-                for (const row of lobbyStatusResult) {
-                    if (!row.LobbyStatus) {
-                        LobbyReady = false
-                        break
-                    }
-                    LobbyReady = true
-                }
-
-                if (LobbyReady) {
-                    // Set lobby to countdown started = 1 so no one can join or leave
-                    await DBConnection.awaitQuery('UPDATE servers SET LobbyReady = 1 WHERE LobbyID = ?', LobbyID)
-                    // Check if there are 2 players in the lobby
-                    let playerCountResult = await DBConnection.awaitQuery('SELECT COUNT(*) AS PlayersCount FROM active_lobby WHERE LobbyID = ?', LobbyID)
-                    let PlayersCount = playerCountResult[0].PlayersCount
-
-                    if (PlayersCount == Gamemode) {
-                        // Check if all teams are already assigned
-                        let teamAssignedResult = await DBConnection.awaitQuery('SELECT TeamsAssigned FROM servers WHERE LobbyID = ?', LobbyID)
-                        if (!teamAssignedResult[0].TeamsAssigned) {
-                            // Teams assigned = 1
-                            await DBConnection.awaitQuery('UPDATE servers SET TeamsAssigned = 1 WHERE LobbyID = ?', LobbyID)
-
-                            // Retrieve all players MMR
-                            let mmrResult = await DBConnection.awaitQuery('SELECT UID, HiddenMMR AS MMR FROM active_lobby WHERE LobbyID = ? AND Team = 0 ORDER BY MMR DESC', LobbyID)
-                            for (const row of mmrResult) {
-                                if (Team1MMR.length == 0 && Team2MMR.length == 0) {
-                                    // Choose player for a team with highest mmr
-                                    if ((Math.random() + 0.1) >= 0.5) {
-                                        Team1MMR.push(row.MMR)
-                                        Team1UID.push(row.UID)
-                                    } else {
-                                        Team2MMR.push(row.MMR)
-                                        Team2UID.push(row.UID)
-                                    }
-                                } else {
-                                    // Teams player counts
-                                    if (Team1MMR.length == (Gamemode / 2) || Team2MMR.length == (Gamemode / 2)) {
-                                        // Team 1 player count
-                                        if (Team1MMR.length == (Gamemode / 2)) {
-                                            Team2MMR.push(row.MMR)
-                                            Team2UID.push(row.UID)
-                                        } else {
-                                            Team1MMR.push(row.MMR)
-                                            Team1UID.push(row.UID)
-                                        }
-                                    } else {
-                                        if (Math.sum(Team1MMR) >= Math.sum(Team2MMR)) {
-                                            Team2MMR.push(row.MMR)
-                                            Team2UID.push(row.UID)
-                                        } else {
-                                            Team1MMR.push(row.MMR)
-                                            Team1UID.push(row.UID)
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Assign TEAM 1 and TEAM 2 players
-                            for (let i = 1; i <= Team1UID.length; i++) {
-                                await DBConnection.awaitQuery('UPDATE active_lobby SET Team = 1, OpponentsTeam = 2 WHERE LobbyID = ? AND UID = ? AND Team = 0 LIMIT 1', [LobbyID, Team1UID[i - 1]])
-
-                            }
-                            for (let i = 1; i <= Team2UID.length; i++) {
-                                await DBConnection.awaitQuery('UPDATE active_lobby SET Team = 2, OpponentsTeam = 1 WHERE LobbyID = ? AND UID = ? AND Team = 0 LIMIT 1', [LobbyID, Team2UID[i - 1]])
-
-                            }
-
-                            // Random factions
-                            while (true) {
-                                let max = Factions.length
-                                Faction1 = Factions[Math.floor(Math.random() * max)]
-                                Faction2 = Factions[Math.floor(Math.random() * max)]
-                                if (Faction1 != Faction2) break;
-                            }
-
-                            // set to 'The Cage' map for groupfights and duels
-                            if (Gamemode == 2 || Gamemode == 6) {
-                                MapName = 'The Cage'
-                            } else {
-                                let mapResult = await DBConnection.awaitQuery('SELECT MapName FROM maps WHERE MapName NOT IN(SELECT Map FROM servers) AND Active = 1 ORDER BY RAND() LIMIT 1;')
-                                MapName = mapResult[0].MapName
-                            }
-                            // Set lobby to countdown started = 1 so no one can join and set map/factions
-                            await DBConnection.awaitQuery('UPDATE servers SET Faction1 = ?, Faction2 = ?, Map = ? WHERE LobbyID = ?', [Faction1, Faction2, MapName, LobbyID])
-
-                            // Starting match!
-                            await DBConnection.awaitQuery('UPDATE servers SET MatchStarted = 1 WHERE LobbyID = ?', LobbyID)
-
-                            // Generate a random match id
-                            while (true) {
-                                MatchId = _RandomCode(8)
-
-                                // Check if match id is unique
-                                let matchResult = await DBConnection.awaitQuery('SELECT match_history.MatchId, active_lobby.MatchId FROM match_history INNER JOIN active_lobby ON match_history.MatchId = ? OR active_lobby.MatchId = ?', [MatchId, MathcId])
-                                if (matchResult.length == 0) break;
-                            }
-
-                            // Set match id
-                            await DBConnection.awaitQuery('UPDATE active_lobby SET MatchId = ?, Abandoned = 1 WHERE LobbyID = ?', [MatchId, LobbyID])
-
-                            MatchStarted = true;
-
-                            if (Gamemode == 2) {
-                                let duelResult = await DBConnection.awaitQuery(`SELECT GROUP_CONCAT(Name SEPARATOR '' and '') AS Duel FROM active_lobby WHERE LobbyID = ?;`, LobbyID)
-                                this.BroadcastServerMsg('matchstarted', Region, LobbyID + ' - ' + 'A duel between ' + Query.FieldByName('Duel').AsString + ' has started!', io, socket);
-                            } else if (Gamemode == 6) {
-                                this.BroadcastServerMsg('matchstarted', Region, LobbyID + ' - ' + 'A groupfight has started!', io, socket)
-                            } else if (Gamemode > 6) {
-                                this.BroadcastServerMsg('matchstarted', Region, LobbyID + ' - ' + 'A battle has started!', io, socket);
-                            }
-                            // Free the dynamic arrays
-                        }
-                    } else {
-                        QueueFull = false
-
-                        // Reset server
-                        await DBConnection.awaitQuery('UPDATE servers SET PlayersCount = ?, LobbyFull = 0, LobbyReady = 0 WHERE LobbyID = ?', [PlayersCount, LobbyID])
-
-                        // Reset status
-                        await DBConnection.awaitQuery('UPDATE active_lobby SET LobbyStatus = 0 WHERE LobbyID = ?', LobbyID)
-                    }
-                }
-            } else {
-                // Reset lobby full flag
-                await DBConnection.awaitQuery('UPDATE servers SET PlayersCount = ?, LobbyFull = 0 WHERE LobbyID = ?', [PlayersCount, LobbyID])
-                // Reset status
-                await DBConnection.awaitQuery('UPDATE active_lobby SET LobbyStatus = 0 WHERE LobbyID = ?', [PlayersCount, LobbyID])
-            }
-
-            if (QueueFull) {
-                // Check if countdown has started already before starting it
-                let lobbyFullResult = await DBConnection.awaitQuery('SELECT LobbyFull FROM servers WHERE LobbyID = ?', LobbyID)
-                if (!lobbyFullResult[0].LobbyFull) {
-                    this.matchTimer(Region, LobbyID, Gamemode, 30, io, currentUsers)
-                    await DBConnection.awaitQuery('UPDATE servers SET LobbyFull = 1 WHERE LobbyID = ?', LobbyID)
-                }
-
-                // Select connection Ids for all players in the lobby and broadcast change
-                let ConnectionIdResult = await DBConnection.awaitQuery('SELECT ConnectionId, Region FROM wbmm_users.users INNER JOIN active_lobby ON active_lobby.UID = users.UID AND active_lobby.LobbyID = ?;', LobbyID)
-                for (const row of ConnectionIdResult) {
-                    // broadcast lobby change
-                    if (MatchStarted) {
-                        WServer.WriteData(row.ConnectionId, 'matchstarted')
-                    } else {
-                        WServer.WriteData(row.ConnectionId, 'updatequeue')
-                    }
-                }
-            } else {
-                // Select connection Ids for all players in the lobby and broadcast change
-                let ConnectionIdResult = await DBConnection.awaitQuery('SELECT ConnectionId FROM wbmm_users.users INNER JOIN active_lobby ON active_lobby.UID = users.UID AND active_lobby.LobbyID = ?;', LobbyID)
-                for (const row of ConnectionIdResult) {
-                    // broadcast lobby change
-                    WServer.WriteData(row.ConnectionId, 'updatequeue');
-                }
-            }
-        }
-    };
-
-    async AcceptLobby(uid, region, io, socket) {
-        // Change player status
-        await ActiveLobby.updateOne({uid},{lobbyStatus:true})
-        // Check if Lobby is ready
-        this.UpdateLobby(uid, region, lobbyID, io, socket);
-    };
-
-
-    async NotifyPlayer(uid, NotificationMessage, io,currentUsers) {
-            io.to(currentUsers.get(uid)).emit("notification",{NotificationMessage})
-        }
-    };
 }
-
-
-class FAdmin {
-    async WarnPlayer(ConnectionId, UID, WarningMessage, ReportID, io, socket) {
-        // Retrieve player UID
-        let result = await DBConnection.awaitQuery('SELECT UID, username FROM wbmm_users.users WHERE ConnectionId = ?;', ConnectionId)
-        if (result.length > 0) {
-            let Admin = {
-                UID: result[0].UID,
-                Name: result[0].username
-            }
-            result = await DBConnection.awaitQuery('SELECT admins.UID, users.username AS username FROM admins INNER JOIN wbmm_users.users ON admins.UID = users.UID WHERE admins.UID = ?;', Admin.UID)
-            if (result.length > 0) { // Admin confirmed
-                let result = await DBConnection.awaitQuery('SELECT UID, username FROM wbmm_users.users WHERE UID = ?;', UID)
-                if (result.length > 0) {
-                    let User = {
-                        UID: result[0].UID,
-                        Name: result[0].username
-                    }
-                    if (WarningMessage.length > 0 && WarningMessage.length <= 200) {
-                        // add warning to database
-                        await DBConnection.awaitQuery('INSERT INTO warnings(UID, Username, Warning, Expired) VALUES (?, ?, ?, NOW() + INTERVAL 7 DAY);', [User.UID, User.Name, WarningMessage])
-                        // add course of action to archive
-                        await DBConnection.awaitQuery('INSERT INTO player_archive(UID, Username, Admin, Action, Message) VALUES (?, ?, ?, ?, ?);', [User.UID, User.Name, Admin.Name, 'Warned', WarningMessage])
-
-                        let result = await DBConnection.awaitQuery('SELECT ConnectionId FROM wbmm_users.users WHERE UID = ?;', UID)
-
-                        WServer.WriteData(result[0].ConnectionId, 'warnnotify?You have received a warning!');
-                        if (ReportID > 0) {
-                            await DBConnection.awaitQuery('UPDATE reports SET Solved = ? WHERE Id = ?;', ['Player has been warned by ' + Admin.Name, ReportID])
-                        }
-                        WServer.WriteData(ConnectionId, 'adminpanel?1?' + User.Name + ' has been warned successfully!');
-                    }
-                }
-            }
-        }
-
-
-
-    };
-
-    async BanPlayer(ConnectionId, UID, Reason, Hours, Permanent, ReportID, io, socket) {
-        // Retrieve caller info
-        let result = await DBConnection.awaitQuery('SELECT UID, username FROM wbmm_users.users WHERE ConnectionId = ?;', ConnectionId)
-        if (result.length > 0) {
-            let Admin = {
-                UID: result[0].UID,
-                Name: result[0].username
-            }
-            let result = await DBConnection.awaitQuery('SELECT admins.UID FROM admins INNER JOIN wbmm_users.users ON admins.UID = users.UID WHERE admins.UID = ?;', Admin.UID)
-            if (result.length > 0) { // Admin confirmed
-                let result = await DBConnection.awaitQuery('SELECT UID, username FROM wbmm_users.users WHERE UID = ?;', UID)
-                if (result.length > 0) {
-                    let User = {
-                        UID: result[0].UID,
-                        Name: result[0].username
-                    }
-                    if (Reason.length > 0 && Reason.length <= 200) {
-                        let hours = Hours.ToString()
-                        if (hours.length > 0 && hours.length <= 3) {
-                            if (Permanent) {
-                                // Ban player permanently
-                                await DBConnection.awaitQuery('REPLACE INTO wbmm_users.ban_list(UID, Username, BanReason) VALUES (?, ?,?);', [User.UID, User.Name, Reason])
-                                await DBConnection.awaitQuery('DELETE FROM warnings WHERE Username = ?;', User.Name)
-                            } else {
-                                // Ban player temporarily
-                                await DBConnection.awaitQuery('REPLACE INTO wbmm_users.ban_list(UID, Username, BanReason, BanStart, BanEnd) VALUES (?, ?, ?, NOW(), NOW() + INTERVAL ? HOUR);', [User.UID, User.Name, Reason, Hours])
-
-                                await DBConnection.awaitQuery('DELETE FROM warnings WHERE Username = ?;', User.Name)
-                            }
-
-                            // add course of action to player archive
-                            let message = Permanent ? 'Banned permanently - ' + Reason : 'Banned for ' + Hours + ' hours - ' + Reason
-                            await DBConnection.awaitQuery('INSERT INTO player_archive(UID, Username, Admin, Action, Message) VALUES (?, ?, ?, ?, ?);', [User.UID, User.Name, Admin.Name, 'Banned', message])
-
-                            let result = await DBConnection.awaitQuery('SELECT ConnectionId FROM wbmm_users.users WHERE username = ?;', User.Name)
-
-                            if (Permanent)
-                                WServer.WriteData(result[0].ConnectionId, 'bannotify?You have been banned permanently!')
-                            else
-                                WServer.WriteData(result[0].ConnectionId, 'bannotify?You have been banned temporarily!');
-
-                            if (ReportID) {
-                                await DBConnection.awaitQuery('UPDATE reports SET Solved = ? WHERE Id = ?;', ['Player has been banned by ' + Admin.Name, ReportID])
-                            }
-
-                            WServer.WriteData(ConnectionId, 'adminpanel?1?' + User.Name + ' has been banned successfully!');
-                        }
-
-
-
-                    }
-                }
-            }
-        }
-    };
-
-    async UnbanPlayer(ConnectionId, UID, Reason, io, socket) {
-        let result = await DBConnection.awaitQuery('SELECT UID, username FROM wbmm_users.users WHERE ConnectionId = ?;', ConnectionId)
-        if (result.length > 0) {
-            let Admin = {
-                UID: result[0].UID,
-                Name: result[0].username
-            }
-            let result = await DBConnection.awaitQuery('SELECT admins.UID FROM admins INNER JOIN wbmm_users.users ON admins.UID = users.UID WHERE admins.UID = ?;', Admin.UID)
-            if (result.length > 0) { // Admin confirmed
-                let result = await DBConnection.awaitQuery('SELECT UID, username FROM wbmm_users.users WHERE UID = ?;', UID)
-                if (result.length > 0) {
-                    let User = {
-                        UID: result[0].UID,
-                        Name: result[0].username
-                    }
-                    if (Reason.length > 0 && Reason.length <= 100) {
-                        // Unban player
-                        await DBConnection.awaitQuery('DELETE FROM wbmm_users.ban_list WHERE username = ?;', User.Name)
-                        await DBConnection.awaitQuery('DELETE FROM warnings WHERE Username = ?;', User.Name)
-
-                        // add course of action to archive
-                        await DBConnection.awaitQuery('INSERT INTO player_archive(UID, Username, Admin, Action, Message) VALUES (?, ?, ?, ?, ?);', [User.UID, User.Name, Admin.Name, 'Unbanned', Reason])
-
-                        WServer.WriteData(ConnectionId, 'adminpanel?1?' + User.Name + ' has been unbanned successfully!');
-                    }
-                }
-            }
-        }
-    };
-
-    async EditUserName(ConnectionId, UID, NewUsername, io, socket) {
-        // Retrieve player UID
-        let result = await DBConnection.awaitQuery('SELECT users.UID, username FROM wbmm_users.users INNER JOIN admins ON ConnectionId = ? AND users.UID = admins.UID;', ConnectionId)
-        if (result.length > 0) { // Admin confirmed
-            let Admin = {
-                UID: result[0].UID,
-                Name: result[0].username
-            }
-            let result = await DBConnection.awaitQuery('SELECT UID, username FROM wbmm_users.users WHERE UID = ?;', UID)
-            if (result.length > 0) {
-                let User = {
-                    UID: result[0].UID,
-                    Name: result[0].username
-                }
-            }
-            if (NewUsername.length <= 15 && NewUsername.length > 1) {
-                let result = await DBConnection.awaitQuery('SELECT UID FROM wbmm_users.users WHERE username = ?;', NewUsername)
-                if (result.length > 0) {
-                    // Set player name
-                    await DBConnection.awaitQuery('UPDATE wbmm_users.users SET username = ? WHERE username = ?;', [NewUsername, User.Name])
-                    // Set new player name if player is in lobby
-                    await DBConnection.awaitQuery('UPDATE active_lobby SET Name = ? WHERE Name = ?;', [NewUsername, User.Name])
-                    // add course of action to archive
-                    await DBConnection.awaitQuery('INSERT INTO player_archive(UID, Username, Admin, Action, Message) VALUES (?, ?, ?, ?, ?);', [User.UID, User.Name, Admin.Name, 'Name changed', 'Player name changed to ' + NewUsername])
-
-                    WServer.WriteData(ConnectionId, 'adminpanel?1?' + User.Name + 's name has been changed successfully!');
-                } else {
-                    WServer.WriteData(ConnectionId, 'adminpanel?0?Username already taken!');
-                }
-            } else {
-                WServer.WriteData(ConnectionId, 'adminpanel?0?Username must be between 2 and 15 chars.');
-            }
-        }
-    };
-
-    async PromoteUser(ConnectionId, UID, io, socket) {
-        // Retrieve caller info
-        let result = await DBConnection.awaitQuery('SELECT users.UID, username FROM wbmm_users.users INNER JOIN admins ON ConnectionId = ? AND users.UID = admins.UID AND admins.HeadAdmin = 1;', ConnectionId)
-        if (result.length > 0) { // Admin confirmed
-            let Admin = {
-                UID: result[0].UID,
-                Name: result[0].username
-            }
-            let result = await DBConnection.awaitQuery('SELECT UID, username FROM wbmm_users.users WHERE UID = ?;', UID)
-            if (result.length > 0) {
-                let User = {
-                    UID: result[0].UID,
-                    Name: result[0].username
-                }
-
-                //check if user was admin
-                let result = await DBConnection.awaitQuery('SELECT admins.UID FROM wbmm_users.users INNER JOIN admins ON username = ? AND admins.UID = users.UID;', User.Name)
-                if (result.length == 0) {
-                    // Add user to admins
-                    await DBConnection.awaitQuery('INSERT INTO admins(UID) VALUES (?);', User.UID)
-                    // add course of action to archive
-                    await DBConnection.awaitQuery('INSERT INTO player_archive(UID, Username, Admin, Action, Message) VALUES (?, ?, ?, ?, ?);', [User.UID, User.Name, Admin.Name, 'Promoted', 'User has been promoted to administrator'])
-
-                    WServer.WriteData(ConnectionId, 'adminpanel?1?' + User.Name + ' has been promoted successfully!');
-                } else {
-                    // Remove user from admins
-                    await DBConnection.awaitQuery('DELETE FROM admins WHERE UID = ?', User.UID)
-                    // add course of action to archive
-                    await DBConnection.awaitQuery('INSERT INTO player_archive(UID, Username, Admin, Action, Message) VALUES (?, ?, ?, ?, ?)', [User.UID, User.Name, Admin.Name, 'Demoted', 'User has been demoted and is no longer an administrator'])
-
-                    WServer.WriteData(ConnectionId, 'adminpanel?1?' + User.Name + ' has been demoted successfully!');
-                }
-            }
-        }
-    };
-
-    async DeleteUser(ConnectionId, UID, io, socket) {
-        // Retrieve caller info
-        let result = await DBConnection.awaitQuery('SELECT users.UID, username FROM wbmm_users.users INNER JOIN admins ON ConnectionId = ? AND users.UID = admins.UID AND admins.HeadAdmin = 1;', ConnectionId)
-        if (result.length > 0) { // Admin confirmed
-            let Admin = {
-                UID: result[0].UID,
-                Name: result[0].username
-            }
-            let result = await DBConnection.awaitQuery('SELECT UID, username FROM wbmm_users.users WHERE UID = ?;', UID)
-            if (result.length > 0) {
-                let User = {
-                    UID: result[0].UID,
-                    Name: result[0].username
-                }
-                // Delete user account
-                await DBConnection.awaitQuery('DELETE FROM wbmm_users.users WHERE username = ?;', User.Name)
-                // add course of action to archive
-                await DBConnection.awaitQuery('INSERT INTO player_archive(UID, Username, Admin, Action, Message) VALUES (?, ?, ?, ?, ?)', [User.UID, User.Name, Admin.Name, 'Deleted', 'User has been deleted from the database'])
-                WServer.WriteData(ConnectionId, 'adminpanel?1?' + User.Name + ' has been deleted successfully!');
-            }
-        }
-    };
-
-    async IgnoreReport(ConnectionId, ReportID, io, socket) {
-        // Retrieve caller info
-        let result = await DBConnection.awaitQuery('SELECT UID, username FROM wbmm_users.users WHERE ConnectionId = ?;', ConnectionId)
-        if (result.length > 0) {
-            let Admin = {
-                UID: result[0].UID,
-                Name: result[0].username
-            }
-            let result = await DBConnection.awaitQuery('SELECT admins.UID FROM admins INNER JOIN wbmm_users.users ON admins.UID = users.UID WHERE admins.UID = ?;', Admin.UID)
-            if (result.length > 0) { // Admin confirmed
-                if (ReportID != 0)
-                    await DBConnection.awaitQuery('UPDATE reports SET Solved = ? WHERE Id = ?;', ['Report has been ignored by ' + Admin.Name, ReportID])
-                WServer.WriteData(ConnectionId, 'adminpanel?1?Report has been ignored successfully!');
-
-            }
-        }
-    };
-
-    async GlobalAnnouncement(ConnectionId, msg, io, socket) {
-        if (msg.length != 0) {
-            // Retrieve player UID
-            let result = await DBConnection.awaitQuery('SELECT UID, username FROM wbmm_users.users WHERE ConnectionId = ?;', ConnectionId)
-            if (result.length > 0) {
-                let player = {
-                    UID: result[0].UID,
-                    Name: result[0].username
-                }
-
-                let result = await DBConnection.awaitQuery('SELECT admins.UID, users.username FROM admins INNER JOIN wbmm_users.users ON admins.UID = users.UID WHERE admins.UID = ?;', player.UID)
-                if (result.length > 0) { // Admin confirmed
-                    if (msg.length <= 200) {
-                        // Select connection Ids for all players and broadcast message
-                        let players = await DBConnection.awaitQuery('SELECT ConnectionId FROM wbmm_users.users WHERE ConnectionId IS NOT NULL;')
-                        for (const row of players) {
-                            WServer.WriteData(row.ConnectionId, 'announcementnotify?' + msg);
-                        }
-                        WServer.WriteData(ConnectionId, 'adminpanel?1?' + 'Announcement has been broadcasted successfully!');
-                    }
-                }
-            }
-        }
-    };
-}
-
-
-
 
 export {
-    FAdmin, FServer
+    FServer
+    //  FAdmin
 }

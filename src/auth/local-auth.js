@@ -12,7 +12,7 @@ export default function (app) {
             res.json({ code: 0, message: "Password was not given" })
         }
         else {
-            passport.authenticate("local", async function (err, user, info) {
+            passport.authenticate("local", async function (err, user) {
                 if (err) {
                     console.log(err)
                     res.json({ code: 0, message: err });
@@ -89,7 +89,7 @@ export default function (app) {
         });
 
     app.route('/api/user/register')
-        .post((req, res, next) => {
+        .post((req, res) => {
             User.register(new User({ username: req.body.username, region: req.body.region, createAt: new Date() }), req.body.password, function (err, user) {
                 if (err) {
                     res.json({ code: 0, message: "Your account could not be saved. Error: " + err });

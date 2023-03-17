@@ -7,7 +7,7 @@ export default function (mmr) {
     else if ((mmr >= 1400) && (mmr < 1600))
         rank = 'Knight';
     else if ((mmr >= 1600) && (mmr < 1800))
-        rank = 'Master Knight';
+        rank = 'MasterKnight';
     else if ((mmr >= 1800) && (mmr < 2000))
         rank = 'Lord';
     else if ((mmr >= 2000) && (mmr < 2500))

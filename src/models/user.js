@@ -1,11 +1,10 @@
 import mongoose from 'mongoose';
 import passportLocalMongoose from 'passport-local-mongoose'
 import Regions from "../constants/regions.js"
-import Troops from "../constants/troops.js"
 
 const UserSchema = new mongoose.Schema({
-    connectionId: { type: String, default: null },
     region: { type: String, enum: Regions },
+    connectionId: { type: String, default: null },
     uid: { type: String, default: "initial" },
     username: { type: String, minLength: 2, maxLength: 15 },
     lastActive: { type: Date, default: new Date() },

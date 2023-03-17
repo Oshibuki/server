@@ -18,3 +18,5 @@ yarn.lock
 .prettierrc
 .babelrc
 pnpm-lock.yaml
+src/tmp.js
+src/tmp.php

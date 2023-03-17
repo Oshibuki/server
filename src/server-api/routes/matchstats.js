@@ -18,11 +18,11 @@ routes.get('/',async function(req, res){
                 team1 = parseInt(team1)
                 team2 = parseInt(team2)
                 await Server.findOne({ lobbyID:server }).update({
-                    Team1Score: { $inc: team1 },
-                    Team2Score: { $inc: team2 }
+                    team1Score: { $inc: team1 },
+                    team2Score: { $inc: team2 }
                 })
             } else if (type == "abandoned") {
-                await ActiveLobby.findOne({ uid }).update({ abandoned:0 })
+                await ActiveLobby.findOne({ uid }).update({ abandoned:false })
             }
             res.end()
         }
