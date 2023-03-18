@@ -1,6 +1,6 @@
 import ActiveLobby from './activeLobby.js'
 import Friend from './friend.js'
-import Map from './map.js'
+import ServerMap from './map.js'
 import MatchHistory from './matchHistory.js'
 import PlayerArchive from './playerArchive.js'
 import PlayerStatus from './playerStatus.js'
@@ -9,4 +9,4 @@ import SeasonStatus from './seasonStatus.js'
 import Server from './server.js'
 import User from './user.js'
 import Warning from './warning.js'
-export  { ActiveLobby, Friend, Map, MatchHistory, PlayerArchive, PlayerStatus, Report, SeasonStatus, Server, User, Warning }
+export  { ActiveLobby, Friend, ServerMap, MatchHistory, PlayerArchive, PlayerStatus, Report, SeasonStatus, Server, User, Warning }

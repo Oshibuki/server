@@ -9,7 +9,7 @@ routes.get('/',async function(req, res){
         if (!server || !uid ) {
             throw Error('Invalid parameters!')
         }else {
-            server = server.slice(5)
+            
             await ActiveLobby.updateOne({uid},{teamkills:{$inc:1}})
             res.end()
         }

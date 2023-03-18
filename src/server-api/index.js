@@ -9,6 +9,8 @@ import countdown from './routes/countdown.js'
 import mainclass from './routes/mainclass.js'
 import justify from './routes/justify.js'
 import whitelisting from './routes/whitelisting.js'
+import remotecommand from './routes/remotecommand.js'
+
 
 
 import teamdamage from './match/teamdamage.js'
@@ -28,6 +30,7 @@ matchMakingRouter.use('/countdown', countdown);
 matchMakingRouter.use('/justify', justify);
 matchMakingRouter.use('/whitelisting', whitelisting);
 matchMakingRouter.use('/mainclass', mainclass);
+matchMakingRouter.use('/remotecommand', remotecommand);
 
 
 matchMakingRouter.use('/match/score', score);

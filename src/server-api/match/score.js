@@ -9,7 +9,7 @@ routes.get('/',async function(req, res){
         if (!server || !team1Score ||team2Score  ) {
             throw Error('Invalid parameters!')
         }else {
-            server = server.slice(5)
+            
             await Server.updateOne({lobbyID:server},{team1Score:{$inc:team1Score},team2Score:{$inc:team2Score}})
             res.end()
         }

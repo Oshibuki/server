@@ -1,5 +1,5 @@
 /* eslint-disable no-unexpected-multiline */
-import { ActiveLobby, Map, SeasonStatus, Server, User, Warning } from './models/index.js'
+import { ActiveLobby, ServerMap, SeasonStatus, Server, User, Warning } from './models/index.js'
 import { Gamemode, Factions } from './constants/index.js'
 import { v4 as uuidv4 } from 'uuid';
 
@@ -189,7 +189,7 @@ class FServer {
                             if (gamemode == Gamemode.groupfight) {
                                 newMap = 'The Cage'
                             } else {
-                                newMap = (await Map.findOne({ mapName: { $ne: preMap } })).mapName
+                                newMap = (await ServerMap.findOne({ mapName: { $ne: preMap } })).mapName
                             }
                             // Set lobby to countdown started = 1 so no one can join and set map/factions
                             await Server.updateOne({ lobbyID }, { faction1, faction2, map: newMap })
@@ -239,7 +239,7 @@ class FServer {
                 let server = await Server.findOne({ lobbyID })
                 if (!server.lobbyFull) {
                     this.getTimer(lobbyID, gamemode, io).reset()
-                    await Server.findOneAndUpdate({ lobbyID },{lobbyFull:true})
+                    server = await Server.findOneAndUpdate({ lobbyID },{lobbyFull:true},{new:true})
                 }
 
                 // broad message to  lobbyID room
@@ -247,14 +247,15 @@ class FServer {
                     if (MatchStarted) {
                         await FServer.sendMsg(player.uid,io,'matchstarted')
                     } else {
-                        await FServer.sendMsg(player.uid,io,'updatequeue', lobbyPlayers)
+                    await FServer.sendMsg(player.uid,io,'updatequeue', {lobbyPlayers,server})
                     }
                 }
                 
 
             } else {
+                let server = await Server.findOne({ lobbyID })
                 for(let player of lobbyPlayers){
-                    await FServer.sendMsg(player.uid,io,'updatequeue', lobbyPlayers)
+                    await FServer.sendMsg(player.uid,io,'updatequeue', {lobbyPlayers,server})
                 }
             }
         }
@@ -279,9 +280,16 @@ class FServer {
     //     this.timerCollection.set("test",1)
     // }
 
-    static getLobbyTimer(lobbyID,gamemode,io) {
-        return function(){
-            
+    static getTimer(lobbyID,gamemode,io) {
+        if(!this.timerCollection){
+            this.timerCollection = new Map()
+        }
+        if(this.timerCollection.has(lobbyID)){
+            return this.timerCollection.get(lobbyID)
+        }else {
+            const counter = this.lobbyTimer(lobbyID,gamemode,io)
+            this.timerCollection.set(lobbyID,counter)
+            return counter
         }
     }
 
@@ -305,7 +313,7 @@ class FServer {
                             if (readyCount < gamemode) {
                                 const unReadyLobbyPlayers = await ActiveLobby.find({ lobbyID,lobbyStatus: false }, { _id: 0, __v: 0 })
                                 for (const player of unReadyLobbyPlayers) {
-                                    FServer.sendMsg(player.uid,io,"updatetimer",{ CountdownTime })
+                                    FServer.sendMsg(player.uid,io,"updateReadyTimer",CountdownTime)
                                 }
                             } else {
                                 CountdownTime = 0;

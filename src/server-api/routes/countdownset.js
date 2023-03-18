@@ -6,7 +6,7 @@ routes.get('/', async (req, res) => {
     let { time: currenttime, server } = req.query;
     try {
         if (server != null && currenttime != null) {
-            server = server.slice(5)
+            
             let timeDict = {
                 "start":["301|30",5],
                 "30":["301|25",5],

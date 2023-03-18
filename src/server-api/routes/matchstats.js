@@ -11,7 +11,7 @@ routes.get('/',async function(req, res){
         } else if (!uid) {
             res.send('No server provided!')
         } else {
-            server = server.slice(5)
+            
             if (["kill", "death", "teamkill"].includes(type)) {
                 await ActiveLobby.findOne({ uid }).update({ [type]: { $inc: 1 } })
             } else if (type == "score") {

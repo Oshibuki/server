@@ -15,7 +15,7 @@ routes.get('/', (req, res) => {
             res.send("type and server are required")
             return
         }
-        server = server.slice(5)
+        
         if (type == "cancelled") {
             // Match cancelled
             res.send('302|2')

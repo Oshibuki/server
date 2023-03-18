@@ -5,4 +5,4 @@ const MapSchema = new mongoose.Schema({
     active: Boolean
 });
 
-export default mongoose.model('Map', MapSchema);
+export default mongoose.model('serverMap', MapSchema);

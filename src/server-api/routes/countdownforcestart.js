@@ -7,7 +7,7 @@ routes.get('/', async (req, res) => {
     let { time: currenttime, server } = req.query;
     try {
         if (server != null && currenttime != null) {
-            server = server.slice(5)
+            
             const timerFile = `../timers/${server}.timer`;
             let timeDict = {
                 "start":["300|10",1],

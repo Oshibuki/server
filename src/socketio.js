@@ -77,7 +77,7 @@ export function serverStarter(app) {
             //广播玩家离线信息
             io.emit('chatMsg', {
                 senderName: "Server",
-                timeStamp: new Date(),
+                timeStamp: new Date().toLocaleTimeString(),
                 message: `${region} - ${username} has disconnected`
             })
             await FServer.DeletePlayerFromLobby(uid,io)
