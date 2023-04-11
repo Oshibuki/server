@@ -4,6 +4,12 @@ dotenv.config();
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 
+import { fileURLToPath } from 'url';
+import { dirname} from 'path';
+  
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
 import express from 'express';
 import helmet from "helmet";
 const { static: Static, json, urlencoded } = express
@@ -16,6 +22,7 @@ import { serverStarter } from './socketio.js';
 
 import { matchMakingRouter } from './server-api/index.js';
 import { apiRouter } from './protectedRoutes/index.js';
+var history = require('connect-history-api-fallback');
 import auth from './auth/index.js';
 
 // const MongoStore = connectMongo(session);
@@ -25,8 +32,8 @@ const app = express();
 app.use(morgan('short'));
 app.use(requestIp.mw())
 app.use(helmet());
-app.set('view engine', 'pug');
-app.set('views', 'src/views/pug');
+app.use(history())
+app.use(Static(__dirname + '/public/dist'));
 
 app.use(cors({
     origin: [

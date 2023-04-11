@@ -20,3 +20,4 @@ yarn.lock
 pnpm-lock.yaml
 src/tmp.js
 src/tmp.php
+public/

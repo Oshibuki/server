@@ -21,7 +21,7 @@ routes.get('/', async (req, res) => {
         }else if (type=="unban" && username ) {
             await User.updateOne({uid,username},{banned:false})
 
-            const ban_list = process.env.WBMM_BAN_LIST || "servers/ban_list.txt"
+            const ban_list = "servers/ban_list.txt"
             const result = readLinesFilter(uid)
             write.sync(ban_list, result.join('\r\n'), { overwrite: true });
         

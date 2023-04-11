@@ -29,13 +29,13 @@ export function serverStarter(app) {
         pingTimeout: 60000
     });
 
-    instrument(io, {
-        auth: {
-          type: "basic",
-          username: "admin",
-          password: "$2b$10$heqvAkYMez.Va6Et2uXInOnkCT6/uQj1brkrbyG3LpopDklcq7ZOS" // "changeit" encrypted with bcrypt
-        },
-      });
+    // instrument(io, {
+    //     auth: {
+    //       type: "basic",
+    //       username: "admin",
+    //       password: "$2b$10$heqvAkYMez.Va6Et2uXInOnkCT6/uQj1brkrbyG3LpopDklcq7ZOS" // "changeit" encrypted with bcrypt
+    //     },
+    //   });
 
     io.of("/").adapter.on("leave-room", (room, id) => {
         console.log(`socket ${id} has leave room ${room}`);

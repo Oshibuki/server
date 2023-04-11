@@ -4,6 +4,7 @@ specifiers:
   '@socket.io/admin-ui': ^0.5.1
   '@types/mongodb': ^4.0.7
   '@types/passport': ^1.0.12
+  connect-history-api-fallback: ^2.0.0
   connect-mongo: ~3.2.0
   cookie-parser: ~1.4.6
   cors: ^2.8.5
@@ -31,6 +32,7 @@ specifiers:
 
 dependencies:
   '@socket.io/admin-ui': 0.5.1_socket.io@4.6.1
+  connect-history-api-fallback: 2.0.0
   connect-mongo: 3.2.0_express-session@1.17.3
   cookie-parser: 1.4.6
   cors: 2.8.5
@@ -1395,6 +1397,11 @@ packages:
   /concat-map/0.0.1:
     resolution: {integrity: sha512-/Srv4dswyQNBfohGpz9o6Yb3Gz3SrUDqBH5rTuhGR7ahtlbYKnVxw2bCFMRljaA7EXHaXZ8wsHdodFvbkhKmqg==}
     dev: true
+
+  /connect-history-api-fallback/2.0.0:
+    resolution: {integrity: sha512-U73+6lQFmfiNPrYbXqr6kZ1i1wiRqXnp2nhMsINseWXO8lDau0LGEffJ8kQi4EjLZympVgRdvqjAgiZ1tgzDDA==}
+    engines: {node: '>=0.8'}
+    dev: false
 
   /connect-mongo/3.2.0_express-session@1.17.3:
     resolution: {integrity: sha512-0Mx88079Z20CG909wCFlR3UxhMYGg6Ibn1hkIje1hwsqOLWtL9HJV+XD0DAjUvQScK6WqY/FA8tSVQM9rR64Rw==}
