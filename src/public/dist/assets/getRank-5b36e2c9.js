@@ -1,0 +1,1 @@
+function s(e){let i="";return e>=0&&e<800?i="Joker":e>=800&&e<1200?i="Peasant":e>=1200&&e<1400?i="Guard":e>=1400&&e<1600?i="Knight":e>=1600&&e<2e3?i="MasterKnight":e>=2e3&&e<2400?i="Lord":e>=2400&&e<3e3?i="Duke":e>=3e3&&e<3600?i="Prince":e>=3600&&e<4e3?i="King":e>=4e3&&(i="Emperor"),i}export{s as g};
